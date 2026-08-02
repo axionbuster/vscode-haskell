@@ -1,8 +1,8 @@
 {
   "name": "haskell",
   "displayName": "Haskell",
-  "description": "Haskell language support powered by the Haskell Language Server",
-  "version": "2.8.2",
+  "description": "Haskell language support powered by the Haskell Language Server (private fork with per-project servers, duplicate-client fix, and display-name shortening)",
+  "version": "2.99.0",
   "license": "MIT",
   "publisher": "haskell",
   "engines": {
@@ -77,6 +77,64 @@
       "type": "object",
       "title": "Haskell",
       "properties": {
+        "haskell.serverScope": {
+          "scope": "resource",
+          "type": "string",
+          "enum": [
+            "workspaceFolder",
+            "nearestProject"
+          ],
+          "enumDescriptions": [
+            "One server per VS Code workspace folder, started in the folder root (upstream behavior).",
+            "One server per project, started in the directory of the nearest hie.yaml, cabal.project, stack.yaml, *.cabal or package.yaml, so nested projects in a monorepo each get a correctly-rooted cradle."
+          ],
+          "default": "nearestProject",
+          "markdownDescription": "(fork) Where to root language servers: per workspace folder (upstream behavior) or per nearest project."
+        },
+        "haskell.ignoreFiles": {
+          "scope": "resource",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/dist-newstyle/**",
+            "**/.stack-work/**"
+          ],
+          "markdownDescription": "(fork) Glob patterns for Haskell files that should never be sent to a language server (e.g. generated sources in build directories). Prevents pointless cradle errors for files like `Paths_*.hs`."
+        },
+        "haskell.clearDiagnosticsOnClose": {
+          "scope": "resource",
+          "type": "string",
+          "enum": [
+            "never",
+            "cradleErrors",
+            "all"
+          ],
+          "enumDescriptions": [
+            "Keep all diagnostics when a file is closed (upstream behavior).",
+            "Clear cradle/hie-bios loading errors when their file is closed; other diagnostics are kept.",
+            "Clear all diagnostics of a file when it is closed."
+          ],
+          "default": "cradleErrors",
+          "markdownDescription": "(fork) Whether to clear diagnostics of a file when its editor is closed. HLS deliberately keeps them, which leaves errors for scratch files stuck in the Problems panel."
+        },
+        "haskell.shortenQualifiedNames": {
+          "scope": "resource",
+          "type": "string",
+          "enum": [
+            "off",
+            "strip-packages",
+            "minimal"
+          ],
+          "enumDescriptions": [
+            "Show names exactly as sent by the server.",
+            "Strip package prefixes such as 'aeson-2.2.5.0:' from type signatures in code lenses and inlay hints.",
+            "Also collapse module paths: 'aeson-2.2.5.0:Data.Aeson.Types.Internal.Value' becomes 'Value'."
+          ],
+          "default": "minimal",
+          "markdownDescription": "(fork) Shorten fully qualified names in type signatures displayed in code lenses and inlay hints. Display only; inserted code is unchanged."
+        },
         "haskell.formattingProvider": {
           "scope": "resource",
           "type": "string",

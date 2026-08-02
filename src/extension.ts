@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { commands, env, ExtensionContext, TextDocument, Uri, window, workspace, WorkspaceFolder } from 'vscode';
 import {
   ExecutableOptions,
@@ -14,6 +15,13 @@ import { findHaskellLanguageServer, HlsExecutable, IEnvVars, fetchConfig } from 
 import { addPathToProcessPath, comparePVP, callAsync } from './utils';
 import { Config, initConfig, initLoggerFromConfig, logConfig } from './config';
 import { HaskellStatusBar } from './statusBar';
+import {
+  buildMiddleware,
+  ClientRoot,
+  clearRoutingCaches,
+  clientRootForDocument,
+  registerDiagnosticsCleaner,
+} from './projectRouting';
 
 /**
  * Global information about the running clients.
@@ -23,10 +31,14 @@ type Client = {
   config: Config;
 };
 
-// The current map of documents & folders to language servers.
+// The current map of client roots to language servers.
 // It may be null to indicate that we are in the process of launching a server,
-// in which case don't try to launch another one for that uri
+// in which case don't try to launch another one for that root
 const clients: Map<string, Client | null> = new Map();
+
+// (fork) Cache of `hls --numeric-version` results keyed by executable path,
+// so starting additional per-project servers doesn't re-probe the binary.
+const hlsNumericVersions: Map<string, string> = new Map();
 
 // This is the entrypoint to our extension
 export async function activate(context: ExtensionContext) {
@@ -43,27 +55,36 @@ export async function activate(context: ExtensionContext) {
     await activateServer(context, document);
   }
 
-  // Stop the server from any workspace folders that are removed.
+  // Stop the servers for any workspace folders that are removed.
   workspace.onDidChangeWorkspaceFolders(async (event) => {
+    clearRoutingCaches();
     for (const folder of event.removed) {
-      const client = clients.get(folder.uri.toString());
-      if (client) {
-        const uri = folder.uri.toString();
-        client.client.info(`Deleting folder for clients: ${uri}`);
-        clients.delete(uri);
-        client.client.info('Stopping the server');
-        await client.client.stop();
+      // Client roots are project directories inside (or equal to) their
+      // workspace folder, so stop every client rooted under the folder.
+      for (const [root, client] of [...clients.entries()]) {
+        if (client && !path.relative(folder.uri.fsPath, Uri.parse(root).fsPath).startsWith('..')) {
+          client.client.info(`Deleting client for root: ${root}`);
+          clients.delete(root);
+          client.client.info('Stopping the server');
+          await client.client.stop();
+          client.config.outputChannel.dispose();
+        }
       }
     }
   });
 
+  // (fork) Drop stale (cradle) diagnostics when documents are closed.
+  context.subscriptions.push(
+    registerDiagnosticsCleaner(() =>
+      [...clients.values()].filter((c): c is Client => c !== null).map((c) => c.client),
+    ),
+  );
+
   // Register editor commands for HIE, but only register the commands once at activation.
   const restartCmd = commands.registerCommand(constants.RestartServerCommandName, async () => {
     for (const langClient of clients.values()) {
-      langClient?.client.info('Stopping the server');
-      await langClient?.client.stop();
-      langClient?.client.info('Starting the server');
-      await langClient?.client.start();
+      langClient?.client.info('Restarting the server');
+      await langClient?.client.restart();
     }
   });
 
@@ -81,8 +102,11 @@ export async function activate(context: ExtensionContext) {
     for (const langClient of clients.values()) {
       langClient?.client.info('Stopping the server');
       await langClient?.client.stop();
+      langClient?.config.outputChannel.dispose();
     }
     clients.clear();
+    clearRoutingCaches();
+    hlsNumericVersions.clear();
     fetchConfig();
 
     for (const document of workspace.textDocuments) {
@@ -132,30 +156,37 @@ export async function activate(context: ExtensionContext) {
 async function activateServer(context: ExtensionContext, document: TextDocument) {
   // We are only interested in Haskell files.
   if (
-    (document.languageId !== 'haskell' &&
-      document.languageId !== 'cabal' &&
-      document.languageId !== 'literate haskell') ||
-    (document.uri.scheme !== 'file' && document.uri.scheme !== 'untitled')
+    document.languageId !== 'haskell' &&
+    document.languageId !== 'cabal' &&
+    document.languageId !== 'literate haskell'
   ) {
     return;
   }
 
-  const uri = document.uri;
-  const folder = workspace.getWorkspaceFolder(uri);
+  // (fork) Only 'file' documents are routed to a server. Upstream also
+  // activated for 'untitled' documents, but the started client could never
+  // serve them (its document selector was 'file'-scheme only) while its
+  // catch-all '**/*' pattern attached it to every other Haskell file,
+  // duplicating hovers/lenses/hints (haskell/vscode-haskell#300, #1178).
+  const clientRoot = clientRootForDocument(document);
+  if (clientRoot === undefined) {
+    return;
+  }
 
-  await activateServerForFolder(context, uri, folder);
+  await activateServerForRoot(context, document.uri, clientRoot);
 }
 
-async function activateServerForFolder(context: ExtensionContext, uri: Uri, folder?: WorkspaceFolder) {
-  const clientsKey = folder ? folder.uri.toString() : uri.toString();
-  // If the client already has an LSP server for this uri/folder, then don't start a new one.
+async function activateServerForRoot(context: ExtensionContext, uri: Uri, clientRoot: ClientRoot) {
+  const { root, folder } = clientRoot;
+  const clientsKey = Uri.file(root).toString();
+  // If the client already has an LSP server for this root, then don't start a new one.
   if (clients.has(clientsKey)) {
     return;
   }
   // Set the key to null to prevent multiple servers being launched at once
   clients.set(clientsKey, null);
 
-  const config = initConfig(workspace.getConfiguration('haskell', uri), uri, folder);
+  const config = initConfig(workspace.getConfiguration('haskell', uri), root, folder);
   const logger: Logger = initLoggerFromConfig(config);
 
   logConfig(logger, config);
@@ -183,14 +214,18 @@ async function activateServerForFolder(context: ExtensionContext, uri: Uri, fold
     debug: { command: hlsExecutable.location, args: config.serverArgs, options: exeOptions },
   };
 
-  // If we're operating on a standalone file (i.e. not in a folder) then we need
-  // to launch the server in a reasonable current directory. Otherwise the cradle
-  // guessing logic in hie-bios will be wrong!
+  // The server is launched in the client root: for 'nearestProject' scope
+  // this is the directory of the nearest project marker (hie.yaml,
+  // cabal.project, stack.yaml, *.cabal, package.yaml), so the cradle
+  // guessing logic in hie-bios sees the project the file belongs to,
+  // not just whatever directory VS Code happens to have open.
   let cwdMsg = `Activating the language server in working dir: ${config.workingDir}`;
-  if (folder) {
+  if (folder && folder.uri.fsPath === root) {
     cwdMsg += ' (the workspace folder)';
+  } else if (folder) {
+    cwdMsg += ` (project root of loaded file ${uri.fsPath})`;
   } else {
-    cwdMsg += ` (parent dir of loaded file ${uri.fsPath})`;
+    cwdMsg += ` (project root or parent dir of loaded file ${uri.fsPath})`;
   }
   logger.info(cwdMsg);
 
@@ -206,7 +241,10 @@ async function activateServerForFolder(context: ExtensionContext, uri: Uri, fold
     });
   }
 
-  const pat = folder ? `${folder.uri.fsPath}/**/*` : '**/*';
+  // (fork) Never '**/*': scope the document selector to the client root.
+  // The upstream catch-all pattern for out-of-folder files attached that
+  // client to every Haskell document, duplicating all results.
+  const pat = `${root}/**/*`;
   logger.log(`document selector patten: ${pat}`);
 
   const cabalDocumentSelector = { scheme: 'file', language: 'cabal', pattern: pat };
@@ -225,15 +263,19 @@ async function activateServerForFolder(context: ExtensionContext, uri: Uri, fold
 
   switch (cabalFileSupport) {
     case 'automatic': {
-      const hlsVersion = await callAsync(
-        hlsExecutable.location,
-        ['--numeric-version'],
-        logger,
-        config.workingDir,
-        undefined /* this command is very fast, don't show anything */,
-        false,
-        serverEnvironment,
-      );
+      let hlsVersion = hlsNumericVersions.get(hlsExecutable.location);
+      if (hlsVersion === undefined) {
+        hlsVersion = await callAsync(
+          hlsExecutable.location,
+          ['--numeric-version'],
+          logger,
+          config.workingDir,
+          undefined /* this command is very fast, don't show anything */,
+          false,
+          serverEnvironment,
+        );
+        hlsNumericVersions.set(hlsExecutable.location, hlsVersion);
+      }
       if (comparePVP(hlsVersion, '1.9.0.0') >= 0) {
         // If hlsVersion is >= '1.9.0.0'
         documentSelector.push(cabalDocumentSelector);
@@ -249,9 +291,17 @@ async function activateServerForFolder(context: ExtensionContext, uri: Uri, fold
       break;
   }
 
+  // (fork) When the client root is a project nested inside the workspace
+  // folder, present the project directory as the workspace folder so the
+  // server's rootUri matches the project.
+  const clientWorkspaceFolder: WorkspaceFolder =
+    folder && folder.uri.fsPath === root
+      ? folder
+      : { uri: Uri.file(root), name: path.basename(root), index: folder?.index ?? 0 };
+
   const clientOptions: LanguageClientOptions = {
-    // Use the document selector to only notify the LSP on files inside the folder
-    // path for the specific workspace.
+    // Use the document selector to only notify the LSP on files inside the
+    // client root path.
     documentSelector: [...documentSelector],
     synchronize: {
       // Synchronize the setting section 'haskell' to the server.
@@ -261,12 +311,12 @@ async function activateServerForFolder(context: ExtensionContext, uri: Uri, fold
     revealOutputChannelOn: RevealOutputChannelOn.Never,
     outputChannel: config.outputChannel,
     outputChannelName: config.langName,
-    middleware: {
-      provideHover: DocsBrowser.hoverLinksMiddlewareHook,
-      provideCompletionItem: DocsBrowser.completionLinksMiddlewareHook,
-    },
-    // Launch the server in the directory of the workspace folder.
-    workspaceFolder: folder,
+    // (fork) Ownership-guarded middleware: exactly one client answers for a
+    // given document even if selectors overlap; also shortens qualified
+    // names in code lenses/inlay hints and rewrites documentation links.
+    middleware: buildMiddleware(root),
+    // Launch the server in the directory of the client root.
+    workspaceFolder: clientWorkspaceFolder,
   };
 
   // Create the LSP client.

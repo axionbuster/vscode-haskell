@@ -2,6 +2,27 @@
 
 [![vsmarketplacebadge](https://vsmarketplacebadges.dev/version/haskell.haskell.png)](https://marketplace.visualstudio.com/items?itemName=haskell.haskell)
 
+> **Private fork.** This is a private fork of `haskell/vscode-haskell` with
+> fixes for duplicated hovers/lenses/inlay hints, per-project server routing
+> for monorepos, ignore globs for generated sources, clearing of stale cradle
+> diagnostics, and shortening of fully qualified names in code lenses and
+> inlay hints. See the 2.99.0 entry in [Changelog.md](Changelog.md) and the
+> `(fork)`-prefixed settings in the extension settings UI.
+>
+> Note on hover documentation for third-party dependencies: that limitation
+> lives in HLS/GHC, not in this extension (HLS reads docs from `.hi` files,
+> which only contain them when dependencies are compiled with GHC's
+> `-haddock` flag — see haskell/haskell-language-server#208). To get docs on
+> hover, build dependencies with `-haddock`, e.g. in `cabal.project`:
+>
+> ```cabal
+> package *
+>   ghc-options: -haddock
+> ```
+>
+> or in `stack.yaml`: `ghc-options: { "$everything": -haddock }`, then
+> rebuild and restart HLS.
+
 This extension adds language support for [Haskell](https://haskell.org), powered by the [Haskell Language Server](https://github.com/haskell/haskell-language-server).
 As almost all features are provided by the server you might find interesting read its [documentation](https://haskell-language-server.readthedocs.io).
 

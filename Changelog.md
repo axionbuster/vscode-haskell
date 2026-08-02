@@ -1,5 +1,29 @@
 # Changelog for vscode-haskell
 
+## 2.99.0 (private fork)
+
+Private fork based on 2.8.2. Changes:
+
+- Fix duplicated hovers, code lenses, code actions and inlay hints: never
+  start a client with a catch-all `**/*` document selector, do not start
+  servers for `untitled` buffers, and guard every request with an ownership
+  check so exactly one client serves a given document
+  (upstream haskell/vscode-haskell#300, #480, #1178).
+- New `haskell.serverScope` (default `nearestProject`): start one server per
+  project (nearest `hie.yaml`, `cabal.project`, `stack.yaml`, `*.cabal` or
+  `package.yaml`) instead of per workspace folder, so nested projects in a
+  monorepo get a correctly rooted cradle (upstream #1016, #442).
+- New `haskell.ignoreFiles` (default `**/dist-newstyle/**`,
+  `**/.stack-work/**`): never send generated sources to a server.
+- New `haskell.clearDiagnosticsOnClose` (default `cradleErrors`): clear
+  cradle loading errors from the Problems panel when their file is closed.
+- New `haskell.shortenQualifiedNames` (default `minimal`): shorten
+  `pkg-1.2.3:Data.Long.Module.Path.Name` to `Name` in code lens and inlay
+  hint type signatures (display only).
+- `Haskell: Restart Haskell LSP server` now uses the client's `restart()`,
+  and `Restart Extension` disposes stale output channels.
+- Cache `hls --numeric-version` probes per executable.
+
 ## 2.8.2
 
 - Add language-haskell extension pack

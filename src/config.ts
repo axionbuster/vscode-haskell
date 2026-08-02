@@ -1,4 +1,4 @@
-import { OutputChannel, Uri, window, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
+import { OutputChannel, window, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { expandHomeDir, IEnvVars } from './utils';
 import * as path from 'path';
 import { Logger } from 'vscode-languageclient';
@@ -23,10 +23,12 @@ export type Config = {
   ghcupConfig: GHCupConfig;
 };
 
-export function initConfig(workspaceConfig: WorkspaceConfiguration, uri: Uri, folder?: WorkspaceFolder): Config {
-  // Set a unique name per workspace folder (useful for multi-root workspaces).
-  const langName = 'Haskell' + (folder ? ` (${folder.name})` : '');
-  const currentWorkingDir = folder ? folder.uri.fsPath : path.dirname(uri.fsPath);
+export function initConfig(workspaceConfig: WorkspaceConfiguration, clientRoot: string, folder?: WorkspaceFolder): Config {
+  // Set a unique name per client root (useful for multi-root workspaces and
+  // (fork) per-project servers).
+  const isFolderRoot = folder !== undefined && folder.uri.fsPath === clientRoot;
+  const langName = 'Haskell' + (isFolderRoot ? ` (${folder.name})` : ` (${path.basename(clientRoot)})`);
+  const currentWorkingDir = clientRoot;
 
   const logLevel = getLogLevel(workspaceConfig);
   const clientLogLevel = getClientLogLevel(workspaceConfig);
