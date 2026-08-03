@@ -1,5 +1,17 @@
 # Changelog for vscode-haskell
 
+## 2.99.8 (private fork)
+
+- Stop showing haddock's hyperlinked source in the panel. It is a
+  documentation artifact rather than an editor view: it hardcodes a light
+  palette that is unreadable against a dark theme, and its stylesheet
+  underlines every link on the page -- the panel's own toolbar included --
+  with a `border-bottom` that theming cannot reach. The `Source` links in
+  hovers and completions are dropped for now; the ones haddock writes into
+  the pages themselves open in a browser, which is what they were written
+  for. `haskell.openSourceInHackage` chooses between Hackage and the local
+  page there.
+
 ## 2.99.7 (private fork)
 
 - Tidy the header bar. It sits at the very top of the page, where the

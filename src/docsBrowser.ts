@@ -202,6 +202,13 @@ async function showDocumentation({
     const fileUri = localUri.with({ fragment: '' });
     const onlineUri = hackageUri ?? hackageUriFor(localUri);
 
+    // Source belongs in a browser for now, not in the panel; see the note on
+    // `openSource`.
+    if (isSourcePage(localUri)) {
+      await openSource(localUri, onlineUri);
+      return undefined;
+    }
+
     if (await fileExists(fileUri)) {
       return await showLocalDocumentation(localUri, onlineUri);
     }
@@ -228,6 +235,32 @@ async function showDocumentation({
     }
   }
   return undefined;
+}
+
+/**
+ * Hand a source page to the browser.
+ *
+ * Rendering it in the panel is disabled for now. Haddock's hyperlinked source
+ * is a documentation artifact, not an editor view: it hardcodes a light
+ * palette, and its stylesheet underlines every link in the page -- our own
+ * toolbar included -- with a `border-bottom` no theming can talk out of it.
+ * Where the panel is going instead is an editor tab holding the real source,
+ * which needs the text from somewhere the panel cannot reach today. Until
+ * then, haddock's page is best served by the browser it was written for.
+ */
+async function openSource(localUri: Uri, onlineUri: string | undefined): Promise<void> {
+  const preferHackage = workspace.getConfiguration('haskell').get<boolean>('openSourceInHackage');
+  const fileUri = localUri.with({ fragment: haddockAnchor(localUri.fragment) });
+  const target = !preferHackage && (await fileExists(localUri.with({ fragment: '' }))) ? fileUri.toString() : onlineUri;
+
+  if (target) {
+    await env.openExternal(Uri.parse(target));
+    return;
+  }
+  await window.showWarningMessage(
+    `No source found for ${moduleTitle(localUri)}: it is not installed locally and the package it ` +
+      'belongs to could not be determined.',
+  );
 }
 
 async function reportUndocumentedModule(localUri: Uri, onlineUri: string | undefined): Promise<void> {
@@ -987,24 +1020,30 @@ export function completionLinksMiddlewareHook(
 const localDocLinkRegex = /\[([^\]]+)\]\((file:[^)\s]+\.html(?:#[^)\s]*)?)\)/gi;
 
 /**
- * Rewrite the `Documentation` and `Source` links HLS puts in hovers and
- * completions so that they go through our own commands.
+ * Rewrite the `Documentation` links HLS puts in hovers and completions so that
+ * they go through our own commands, and drop its `Source` links: what they lead
+ * to is haddock's hyperlinked source, which the panel does not show for now (see
+ * `openSource`). The links haddock puts in the pages themselves still work --
+ * they open in a browser -- so nothing is silently dead.
  */
 export function rewriteDocLinks(markdown: string): string {
   const configuration = workspace.getConfiguration('haskell');
   const alwaysHackageDocs = configuration.get<boolean>('openDocumentationInHackage');
-  const alwaysHackageSource = configuration.get<boolean>('openSourceInHackage');
 
   return markdown.replace(localDocLinkRegex, (all, title: string, localPath: string) => {
     try {
       const localUri = Uri.parse(localPath);
+      if (isSourcePage(localUri)) {
+        return '';
+      }
       const hackageUri = hackageUriFor(localUri);
-      const alwaysHackage = isSourcePage(localUri) ? alwaysHackageSource : alwaysHackageDocs;
       const args = encodeURIComponent(JSON.stringify({ title, localPath, hackageUri }));
       // Without a Hackage uri there is nothing to fall back to, so always try
       // the local page -- `showDocumentation` reports it if it is missing.
       const command =
-        alwaysHackage && hackageUri ? `${OpenOnHackageCommandName}?${args}` : `${ShowDocumentationCommandName}?${args}`;
+        alwaysHackageDocs && hackageUri
+          ? `${OpenOnHackageCommandName}?${args}`
+          : `${ShowDocumentationCommandName}?${args}`;
       return `[${title}](command:${command})`;
     } catch {
       return all;
