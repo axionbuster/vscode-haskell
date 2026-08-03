@@ -540,19 +540,133 @@ function navButton(label: string, nav: 'back' | 'forward', enabled: boolean): st
   return `<button type="button" data-nav="${nav}"${enabled ? '' : ' disabled'} title="${title}">${label}</button>`;
 }
 
-const toolbarStyle = `
+/**
+ * Haddock ships a light theme of its own, which lands in a dark editor as a
+ * white slab -- and vscode, which styles `code` and the scrollbars for the
+ * editor's theme, then paints dark chips onto it. Every colour haddock sets is
+ * mapped here to the one the editor uses for the same purpose.
+ *
+ * The selectors mirror haddock's own (`linuwial.css`, `quick-jump.css`) rather
+ * than trying to outrank them: this sheet is injected after the page's own
+ * stylesheets, so equal specificity leaves document order to settle it and no
+ * rule here needs `!important`. Selectors haddock drops between versions do no
+ * harm; ones it adds simply keep their own colour.
+ */
+const themeStyle = `
   <style>
+    body {
+      background: var(--vscode-editor-background);
+      color: var(--vscode-editor-foreground);
+      font-family: var(--vscode-font-family);
+    }
+    a[href]:link, a[href]:visited, a[href].def:link, a[href].def:visited {
+      color: var(--vscode-textLink-foreground);
+    }
+    a[href]:hover, a[href].def:hover { color: var(--vscode-textLink-activeForeground); }
+    .caption, h1, h2, h3, h4, h5, h6, summary { color: var(--vscode-foreground); }
+    .collapser:before, .expander:before, .noexpander:before { color: var(--vscode-icon-foreground); }
+
+    /* Code, and the bars haddock sets declarations on. */
+    pre, code, tt, .src, .inline-code { font-family: var(--vscode-editor-font-family); }
+    pre {
+      background-color: var(--vscode-textCodeBlock-background);
+      border: 1px solid var(--vscode-widget-border, transparent);
+    }
+    .src, .inline-code, .subs .subs p.src, .methods, .constructors,
+    #synopsis ul, #synopsis ul li.src, #contents-list, table.info, .doc th {
+      background-color: var(--vscode-textCodeBlock-background);
+      color: var(--vscode-editor-foreground);
+    }
+    blockquote {
+      background-color: var(--vscode-textBlockQuote-background);
+      border-left: 3px solid var(--vscode-textBlockQuote-border);
+    }
+
+    /* Rules and borders. */
+    #module-header .caption, .doc th, .doc td, table.info, .methods, .constructors {
+      border-color: var(--vscode-widget-border, var(--vscode-panel-border));
+    }
+    .top p.src { border-bottom: 3px solid var(--vscode-panel-border); }
+    #interface span.fixity, #interface span.rightedge { border-left-color: var(--vscode-panel-border); }
+    #synopsis .show { border: 1px solid var(--vscode-panel-border); }
+
+    /* Chrome: the package bar, the footer, and the muted odds and ends. */
+    #package-header {
+      background: var(--vscode-editorWidget-background);
+      color: var(--vscode-editorWidget-foreground);
+      border-bottom: 1px solid var(--vscode-editorWidget-border);
+    }
+    #footer {
+      background: var(--vscode-editor-background);
+      border-top: 1px solid var(--vscode-panel-border);
+      color: var(--vscode-descriptionForeground);
+    }
+    #interface .src .selflink, #interface .src .link, #interface span.fixity, #footer {
+      color: var(--vscode-descriptionForeground);
+    }
+
+    /* Where a jump landed, in the colour the editor highlights a match with. */
+    :target, :target:hover, .vscode-haskell-docs-target {
+      background: var(--vscode-editor-findMatchHighlightBackground);
+    }
+
+    /* The quick jump overlay. */
+    #search-form input {
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, transparent);
+    }
+    #search-form, #search-results, .dropdown-menu { box-shadow: 0 2px 8px var(--vscode-widget-shadow); }
+    #search-results, .dropdown-menu {
+      background: var(--vscode-editorWidget-background);
+      color: var(--vscode-editorWidget-foreground);
+      border: 1px solid var(--vscode-editorWidget-border);
+    }
+    #search-results > ul > li { border-bottom: 1px solid var(--vscode-editorWidget-border); }
+    .search-module > ul > li > a[href].active-link {
+      background: var(--vscode-list-activeSelectionBackground);
+      color: var(--vscode-list-activeSelectionForeground);
+    }
+    #search p.error { color: var(--vscode-errorForeground); }
+    .more-results, .more-results::before, .search-result ul.subs::after, .keyboard-shortcuts th {
+      color: var(--vscode-descriptionForeground);
+    }
+    .key {
+      background: var(--vscode-keybindingLabel-background);
+      color: var(--vscode-keybindingLabel-foreground);
+      border: 1px solid var(--vscode-keybindingLabel-border);
+    }
+    .dropdown-menu button, .dropdown-menu button:hover, .dropdown-menu button:active {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: 1px solid var(--vscode-button-border, transparent);
+    }
+    .dropdown-menu button:hover { background: var(--vscode-button-hoverBackground); }
+
+    /* Our own toolbar, in the editor's widget colours. */
+    .vscode-haskell-docs-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10000;
+      margin: 0 0 8px 0;
+      padding: 6px 10px;
+      font-family: var(--vscode-font-family);
+      font-size: 12px;
+      background: var(--vscode-editorWidget-background);
+      color: var(--vscode-editorWidget-foreground);
+      border-bottom: 1px solid var(--vscode-editorWidget-border);
+    }
     .vscode-haskell-docs-toolbar button {
       font: inherit;
       background: none;
       border: none;
       padding: 0 4px;
       cursor: pointer;
-      color: var(--vscode-textLink-foreground, #06c);
+      color: var(--vscode-textLink-foreground);
     }
     .vscode-haskell-docs-toolbar button:disabled {
       cursor: default;
-      color: var(--vscode-disabledForeground, #999);
+      color: var(--vscode-disabledForeground);
     }
   </style>`;
 
@@ -587,14 +701,9 @@ export function renderDocumentationPage(
     }),
   );
   const toolbar =
-    toolbarStyle +
+    themeStyle +
     `
-    <div class="vscode-haskell-docs-toolbar"
-         style="position:sticky;top:0;z-index:10000;padding:6px 10px;margin:0 0 8px 0;
-                font-family:var(--vscode-font-family);font-size:12px;
-                background:var(--vscode-editorWidget-background,#eee);
-                color:var(--vscode-editorWidget-foreground,#333);
-                border-bottom:1px solid var(--vscode-editorWidget-border,#ccc);">
+    <div class="vscode-haskell-docs-toolbar">
       ${links.join(' &middot; ')}
     </div>`;
 
@@ -612,11 +721,20 @@ export function renderDocumentationPage(
         const anchors = ${inlineJson([anchor, localUri.fragment].filter((a) => a.length > 0))};
         const fileBase = ${inlineJson(fileUri.toString())};
 
+        const targetMark = 'vscode-haskell-docs-target';
+
         function scrollTo(names) {
           for (const name of names) {
             const target = document.getElementById(name) || document.getElementsByName(name)[0];
             if (target) {
               target.scrollIntoView({ block: 'start' });
+              // We scroll ourselves rather than setting the location, so :target
+              // never matches: mark where we landed the same way instead.
+              const marked = document.querySelector('.' + targetMark);
+              if (marked) {
+                marked.classList.remove(targetMark);
+              }
+              target.classList.add(targetMark);
               return name;
             }
           }

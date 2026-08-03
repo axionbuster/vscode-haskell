@@ -1,5 +1,18 @@
 # Changelog for vscode-haskell
 
+## 2.99.5 (private fork)
+
+- Theme the documentation panel after the editor. Haddock ships a light
+  theme of its own, which arrived in a dark editor as a white slab -- and
+  vscode, which styles `code` and the scrollbars for the editor's theme,
+  then painted dark chips onto it. Every colour haddock sets is now mapped
+  to the variable the editor uses for the same purpose, prose is set in the
+  UI font and code in the editor font, and a jump is marked in the colour
+  the editor highlights a match with (haddock's own `:target` yellow never
+  applied, since the panel scrolls rather than following the fragment).
+- The toolbar's styling moved into that same stylesheet instead of being
+  spelled out inline on the element.
+
 ## 2.99.4 (private fork)
 
 - Record anchor jumps in the documentation panel's history. Haddock links
