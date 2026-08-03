@@ -1,5 +1,14 @@
 # Changelog for vscode-haskell
 
+## 2.99.7 (private fork)
+
+- Tidy the header bar. It sits at the very top of the page, where the
+  webview's corners are rounded, so its own tint was clipped into a bar
+  rounded above and square below. It takes the page's background now --
+  still enough to hide what scrolls under it, invisible at the corners --
+  and separates with a hairline instead. Its padding was 6px above the
+  text against 6px plus an 8px margin below; it is even now.
+
 ## 2.99.6 (private fork)
 
 - Scroll clear of the toolbar. It is sticky, so the definition a page was

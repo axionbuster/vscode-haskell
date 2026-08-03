@@ -643,19 +643,26 @@ const themeStyle = `
     }
     .dropdown-menu button:hover { background: var(--vscode-button-hoverBackground); }
 
-    /* Our own toolbar, in the editor's widget colours. */
+    /*
+     * Our own toolbar. It sits at the very top of the page, where the webview's
+     * corners are rounded, so a tint of its own would be clipped into a bar
+     * rounded above and square below. It takes the page's own background
+     * instead -- enough to hide what scrolls under it, invisible at the corners
+     * -- and separates with a hairline. The padding is even top and bottom.
+     */
     .vscode-haskell-docs-toolbar {
       position: sticky;
       top: 0;
       z-index: 10000;
-      margin: 0 0 8px 0;
-      padding: 6px 10px;
+      margin: 0;
+      padding: 8px 12px;
       font-family: var(--vscode-font-family);
       font-size: 12px;
-      background: var(--vscode-editorWidget-background);
-      color: var(--vscode-editorWidget-foreground);
-      border-bottom: 1px solid var(--vscode-editorWidget-border);
+      background: var(--vscode-editor-background);
+      color: var(--vscode-editor-foreground);
+      border-bottom: 1px solid var(--vscode-panel-border);
     }
+    .vscode-haskell-docs-toolbar button:last-of-type { margin-right: 8px; }
     .vscode-haskell-docs-toolbar button {
       font: inherit;
       background: none;
