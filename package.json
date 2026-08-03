@@ -2,7 +2,7 @@
   "name": "haskell",
   "displayName": "Haskell",
   "description": "Haskell language support powered by the Haskell Language Server (private fork with per-project servers, duplicate-client fix, and display-name shortening)",
-  "version": "2.99.0",
+  "version": "2.99.1",
   "license": "MIT",
   "publisher": "haskell",
   "engines": {
@@ -163,14 +163,14 @@
         "haskell.openDocumentationInHackage": {
           "scope": "resource",
           "type": "boolean",
-          "default": true,
-          "description": "When opening 'Documentation' for external libraries, open in hackage by default. Set to false to instead open in vscode."
+          "default": false,
+          "description": "When opening 'Documentation' for external libraries, always go to Hackage. By default the locally installed haddock page is shown in vscode, falling back to Hackage when it is not installed."
         },
         "haskell.openSourceInHackage": {
           "scope": "resource",
           "type": "boolean",
-          "default": true,
-          "description": "When opening 'Source' for external libraries, open in hackage by default. Set to false to instead open in vscode."
+          "default": false,
+          "description": "When opening 'Source' for external libraries, always go to Hackage. By default the locally installed haddock source page is shown in vscode, falling back to Hackage when it is not installed."
         },
         "haskell.trace.server": {
           "scope": "resource",

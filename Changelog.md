@@ -1,5 +1,22 @@
 # Changelog for vscode-haskell
 
+## 2.99.1 (private fork)
+
+- Fix the `Documentation` and `Source` links in hovers and completions:
+  - Derive the package from the local haddock path instead of assuming a
+    fixed layout, so cabal-store, stack, nix and GHC-bundled docs no longer
+    end up as `hackage.haskell.org/package/html/...`, and drop the unit-id
+    hash from GHC's `base-4.21.2.0-fc24` style directories.
+  - Escape anchors the way haddock does: HLS emits the raw name, so `.!=`
+    now links to `#v:.-33--61-` and `foldl'` to `#v:foldl-39-` instead of
+    landing on a page that does not exist or at the top of it.
+  - Link to the exact installed version, `package/aeson-2.2.3.0/docs/...`.
+  - Show the local page rather than a dump of its bytes as decimal numbers,
+    reuse one panel, scroll to the anchor, and follow links within it.
+- `haskell.openDocumentationInHackage` and `haskell.openSourceInHackage`
+  now default to `false`: locally installed haddock pages are shown in
+  vscode, with Hackage as the fallback when they are not installed.
+
 ## 2.99.0 (private fork)
 
 Private fork based on 2.8.2. Changes:
