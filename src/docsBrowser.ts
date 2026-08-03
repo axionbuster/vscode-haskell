@@ -1,4 +1,5 @@
-import { basename, dirname, sep } from 'path';
+import { homedir } from 'os';
+import { basename, dirname, join, resolve, sep } from 'path';
 import {
   CancellationToken,
   commands,
@@ -7,6 +8,7 @@ import {
   CompletionList,
   Disposable,
   env,
+  FileType,
   Hover,
   MarkdownString,
   MarkedString,
@@ -156,6 +158,23 @@ async function fileExists(uri: Uri): Promise<boolean> {
   }
 }
 
+/**
+ * True when the page is missing but its documentation directory is there, i.e.
+ * haddock did generate docs for this package and simply has no page for this
+ * module -- it is not exposed. Hackage builds the same set of pages, so it
+ * would answer with a 404; the link is dead everywhere and following it is
+ * worse than saying so.
+ *
+ * Sources are exempt: Hackage builds them with `--hyperlinked-source` even
+ * where the locally installed haddock has no `src` directory at all.
+ */
+async function isUndocumentedModule(fileUri: Uri): Promise<boolean> {
+  if (isSourcePage(fileUri)) {
+    return false;
+  }
+  return !(await fileExists(fileUri)) && (await fileExists(Uri.file(dirname(fileUri.fsPath))));
+}
+
 // ---------------------------------------------------------------------------
 // Showing documentation
 // ---------------------------------------------------------------------------
@@ -187,6 +206,13 @@ async function showDocumentation({
       return await showLocalDocumentation(localUri, onlineUri);
     }
 
+    // haddock links to modules a package does not expose, and those pages
+    // exist neither here nor on Hackage. Say so instead of opening a 404.
+    if (await isUndocumentedModule(fileUri)) {
+      await reportUndocumentedModule(localUri, onlineUri);
+      return undefined;
+    }
+
     if (onlineUri) {
       await env.openExternal(Uri.parse(onlineUri));
       return undefined;
@@ -204,9 +230,30 @@ async function showDocumentation({
   return undefined;
 }
 
+async function reportUndocumentedModule(localUri: Uri, onlineUri: string | undefined): Promise<void> {
+  const packageId = packageIdFromDocPath(localUri.fsPath);
+  const packageName = packageId ? `${packageId.name}-${packageId.version}` : 'its package';
+  const openPage = 'Open on Hackage anyway';
+  const openPackage = 'Open package on Hackage';
+  const offered = onlineUri ? [openPage, ...(packageId ? [openPackage] : [])] : [];
+
+  const choice = await window.showWarningMessage(
+    `${moduleTitle(localUri)} has no documentation page: ${packageName} does not expose the module, ` +
+      'so haddock built one neither here nor on Hackage.',
+    ...offered,
+  );
+  if (choice === openPage && onlineUri) {
+    await env.openExternal(Uri.parse(onlineUri));
+  } else if (choice === openPackage && packageId) {
+    await env.openExternal(Uri.parse(`https://hackage.haskell.org/package/${packageId.name}-${packageId.version}`));
+  }
+}
+
 // A single reusable panel, so that following links does not pile up editors.
 let docsPanel: WebviewPanel | undefined;
 let docsPanelRoots: string[] = [];
+/** The page the panel currently shows; links are resolved relative to it. */
+let docsPanelUri: Uri | undefined;
 
 /**
  * Roots the webview may load resources (stylesheets, scripts, images) from.
@@ -247,10 +294,12 @@ async function showLocalDocumentation(localUri: Uri, hackageUri: string | undefi
     docsPanel.onDidDispose(() => {
       docsPanel = undefined;
       docsPanelRoots = [];
+      docsPanelUri = undefined;
     });
     docsPanel.webview.onDidReceiveMessage(onWebviewMessage);
   }
 
+  docsPanelUri = fileUri;
   docsPanel.title = moduleTitle(fileUri);
   docsPanel.webview.html = renderDocumentationPage(docsPanel.webview, html, localUri, hackageUri);
   docsPanel.reveal(docsPanel.viewColumn ?? ViewColumn.Beside, true);
@@ -259,7 +308,11 @@ async function showLocalDocumentation(localUri: Uri, hackageUri: string | undefi
 
 /** Follow a link the user clicked inside the webview. */
 async function onWebviewMessage(message: unknown): Promise<void> {
-  const href = (message as { href?: unknown } | undefined)?.href;
+  const { href, raw } = (message ?? {}) as { href?: unknown; raw?: unknown };
+  if (typeof raw === 'string') {
+    await followPlaceholderLink(raw);
+    return;
+  }
   if (typeof href !== 'string') {
     return;
   }
@@ -269,6 +322,84 @@ async function onWebviewMessage(message: unknown): Promise<void> {
     await showDocumentation({ localPath: href });
   } else if (['http', 'https', 'mailto'].includes(target.scheme)) {
     await env.openExternal(target);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `${pkgroot}` links
+//
+// Cabal writes cross-package links into store haddocks with the `${pkgroot}`
+// variable from the dependency's `haddock-html` field left unexpanded:
+//
+//   ${pkgroot}/../../../share/doc/ghc-9.14.1/html/libraries/base-4.22.0.0-fde1/Control-Monad.html
+//
+// Resolving that as a relative url yields a path that cannot exist, so the
+// page has to be looked for under the roots such a path can hang off.
+// ---------------------------------------------------------------------------
+
+async function followPlaceholderLink(raw: string): Promise<void> {
+  const current = docsPanelUri;
+  if (!current) {
+    return;
+  }
+  const hash = raw.indexOf('#');
+  const fragment = hash < 0 ? '' : raw.slice(hash + 1);
+  // Drop the placeholder and the `..` steps that follow it: what remains is a
+  // path relative to whichever root the placeholder stood for.
+  const relative = (hash < 0 ? raw : raw.slice(0, hash)).replace(/^\$\{[^}]*\}[/\\]*/, '').replace(/^(\.\.[/\\])+/, '');
+  const resolved = await resolvePlaceholderPath(relative, current);
+  // Nothing installed matches: hand the path to showDocumentation anyway, so
+  // that the package it names still gets looked up on Hackage.
+  const target = resolved ?? Uri.file(`/${relative}`);
+  await showDocumentation({ localPath: target.with({ fragment }).toString() });
+}
+
+async function resolvePlaceholderPath(relative: string, currentFile: Uri): Promise<Uri | undefined> {
+  for (const root of await placeholderRoots(relative, currentFile)) {
+    const candidate = Uri.file(resolve(root, relative));
+    if (await fileExists(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+/** Roots a `${pkgroot}` relative path may hang off, best guess first. */
+async function placeholderRoots(relative: string, currentFile: Uri): Promise<string[]> {
+  const roots: string[] = [];
+
+  // Packages installed alongside this one, e.g. two packages in a cabal store.
+  let dir = dirname(currentFile.fsPath);
+  for (let i = 0; i < 10 && dirname(dir) !== dir; i++) {
+    roots.push(dir);
+    dir = dirname(dir);
+  }
+
+  // Boot libraries live in the GHC installation the path itself names.
+  const ghc = /^share[/\\]doc[/\\]ghc-([\d.]+)[/\\]/.exec(relative);
+  if (ghc) {
+    const version = ghc[1];
+    const ghcups = join(homedir(), '.ghcup', 'ghc');
+    roots.push(
+      join(ghcups, version),
+      `/usr/lib/ghc-${version}`,
+      `/usr/local/lib/ghc-${version}`,
+      `/opt/ghc/${version}`,
+    );
+    roots.push('/usr', '/usr/local');
+    // ghcup directories are not always named after the version alone.
+    roots.push(...(await subdirectories(ghcups)));
+  }
+
+  return roots;
+}
+
+async function subdirectories(fsPath: string): Promise<string[]> {
+  try {
+    const entries = await workspace.fs.readDirectory(Uri.file(fsPath));
+    return entries.filter(([, type]) => type === FileType.Directory).map(([name]) => join(fsPath, name));
+  } catch {
+    return [];
   }
 }
 
@@ -351,6 +482,12 @@ export function renderDocumentationPage(
           event.preventDefault();
           if (href.startsWith('#')) {
             scrollTo([decodeURIComponent(href.slice(1))]);
+            return;
+          }
+          // Cabal leaves \${pkgroot} in cross package links; resolving it as a
+          // url would destroy the placeholder, so pass it on untouched.
+          if (href.indexOf('\${') >= 0) {
+            vscode.postMessage({ raw: href });
             return;
           }
           try {

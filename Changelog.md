@@ -1,5 +1,18 @@
 # Changelog for vscode-haskell
 
+## 2.99.2 (private fork)
+
+- Follow links inside the documentation panel correctly:
+  - Expand the `${pkgroot}` variable cabal leaves unexpanded in the cross
+    package links of store haddocks. Links to boot libraries such as
+    `base` now open the haddock installed with GHC instead of falling
+    through to Hackage; the page is looked for under the roots such a
+    path can hang off, the GHC installation included.
+  - Do not follow links to modules a package does not expose, such as
+    aeson's `Data.Aeson.Types.FromJSON`. Haddock emits them but builds no
+    page for them, here or on Hackage, so the link used to end on a
+    Hackage 404. Report it instead, and offer the package page.
+
 ## 2.99.1 (private fork)
 
 - Fix the `Documentation` and `Source` links in hovers and completions:
