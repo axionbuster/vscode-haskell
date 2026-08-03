@@ -1,5 +1,18 @@
 # Changelog for vscode-haskell
 
+## 2.99.3 (private fork)
+
+- Stop the documentation panel from opening the system browser alongside
+  itself. The webview host listens for clicks as well and hands whatever it
+  sees to the browser; the panel's own handler ran too late to stop it, so
+  a followed link opened twice. It now runs in the capture phase and ends
+  the event once it takes a link over. A modified click (ctrl, cmd, shift)
+  still goes out to the browser deliberately.
+- Give the panel a history: `Back` and `Forward` in its toolbar, bound to
+  Alt+Left/Alt+Right and to the mouse thumb buttons. The history survives
+  the panel being recreated for a page outside its resource roots, and is
+  cleared when the panel is closed.
+
 ## 2.99.2 (private fork)
 
 - Follow links inside the documentation panel correctly:

@@ -255,6 +255,52 @@ let docsPanelRoots: string[] = [];
 /** The page the panel currently shows; links are resolved relative to it. */
 let docsPanelUri: Uri | undefined;
 
+/** Pages visited in the panel, oldest first, for the Back/Forward buttons. */
+interface HistoryEntry {
+  localPath: string;
+  hackageUri?: string;
+}
+let docsHistory: HistoryEntry[] = [];
+let docsHistoryIndex = -1;
+const historyLimit = 100;
+/**
+ * Set while we dispose the panel ourselves to widen `localResourceRoots`; the
+ * history belongs to the user's navigation, not to the panel instance.
+ */
+let recreatingPanel = false;
+
+function pushHistoryEntry(entry: HistoryEntry): void {
+  if (docsHistory[docsHistoryIndex]?.localPath === entry.localPath) {
+    return;
+  }
+  docsHistory = [...docsHistory.slice(0, docsHistoryIndex + 1), entry].slice(-historyLimit);
+  docsHistoryIndex = docsHistory.length - 1;
+}
+
+async function navigateHistory(delta: number): Promise<void> {
+  const index = docsHistoryIndex + delta;
+  const entry = docsHistory[index];
+  if (!entry) {
+    return;
+  }
+  // Set first: the toolbar the page renders with reflects where we now are.
+  const previous = docsHistoryIndex;
+  docsHistoryIndex = index;
+  try {
+    await showLocalDocumentation(Uri.parse(entry.localPath), entry.hackageUri, false);
+  } catch (e) {
+    // The page went away since it was visited -- drop it and stay put.
+    docsHistoryIndex = previous;
+    docsHistory.splice(index, 1);
+    if (index < docsHistoryIndex) {
+      docsHistoryIndex--;
+    }
+    if (e instanceof Error) {
+      await window.showErrorMessage(e.message);
+    }
+  }
+}
+
 /**
  * Roots the webview may load resources (stylesheets, scripts, images) from.
  * The parent directories are included so that links into sibling modules and
@@ -271,7 +317,11 @@ function isUnder(fsPath: string, root: string): boolean {
   return fsPath === root || fsPath.startsWith(root.endsWith(sep) ? root : root + sep);
 }
 
-async function showLocalDocumentation(localUri: Uri, hackageUri: string | undefined): Promise<WebviewPanel> {
+async function showLocalDocumentation(
+  localUri: Uri,
+  hackageUri: string | undefined,
+  recordHistory = true,
+): Promise<WebviewPanel> {
   const fileUri = localUri.with({ fragment: '' });
   const html = new TextDecoder().decode(await workspace.fs.readFile(fileUri));
 
@@ -280,7 +330,12 @@ async function showLocalDocumentation(localUri: Uri, hackageUri: string | undefi
   if (docsPanel && !docsPanelRoots.some((root) => isUnder(fileUri.fsPath, root))) {
     const stale = docsPanel;
     docsPanel = undefined;
-    stale.dispose();
+    recreatingPanel = true;
+    try {
+      stale.dispose();
+    } finally {
+      recreatingPanel = false;
+    }
   }
 
   if (!docsPanel) {
@@ -295,20 +350,35 @@ async function showLocalDocumentation(localUri: Uri, hackageUri: string | undefi
       docsPanel = undefined;
       docsPanelRoots = [];
       docsPanelUri = undefined;
+      if (!recreatingPanel) {
+        docsHistory = [];
+        docsHistoryIndex = -1;
+      }
     });
     docsPanel.webview.onDidReceiveMessage(onWebviewMessage);
   }
 
+  if (recordHistory) {
+    pushHistoryEntry({ localPath: localUri.toString(), hackageUri });
+  }
+
   docsPanelUri = fileUri;
   docsPanel.title = moduleTitle(fileUri);
-  docsPanel.webview.html = renderDocumentationPage(docsPanel.webview, html, localUri, hackageUri);
+  docsPanel.webview.html = renderDocumentationPage(docsPanel.webview, html, localUri, hackageUri, {
+    canGoBack: docsHistoryIndex > 0,
+    canGoForward: docsHistoryIndex >= 0 && docsHistoryIndex < docsHistory.length - 1,
+  });
   docsPanel.reveal(docsPanel.viewColumn ?? ViewColumn.Beside, true);
   return docsPanel;
 }
 
 /** Follow a link the user clicked inside the webview. */
 async function onWebviewMessage(message: unknown): Promise<void> {
-  const { href, raw } = (message ?? {}) as { href?: unknown; raw?: unknown };
+  const { href, raw, nav } = (message ?? {}) as { href?: unknown; raw?: unknown; nav?: unknown };
+  if (nav === 'back' || nav === 'forward') {
+    await navigateHistory(nav === 'back' ? -1 : 1);
+    return;
+  }
   if (typeof raw === 'string') {
     await followPlaceholderLink(raw);
     return;
@@ -412,11 +482,27 @@ function commandLink(label: string, command: string, args: unknown): string {
   return `<a href="command:${command}?${encodeURIComponent(JSON.stringify(args))}">${label}</a>`;
 }
 
+function navButton(label: string, nav: 'back' | 'forward', enabled: boolean): string {
+  return (
+    `<button type="button" data-nav="${nav}"${enabled ? '' : ' disabled'} title="${
+      nav === 'back' ? 'Back (Alt+Left)' : 'Forward (Alt+Right)'
+    }" style="font:inherit;background:none;border:none;padding:0 4px;cursor:${enabled ? 'pointer' : 'default'};` +
+    `color:${enabled ? 'var(--vscode-textLink-foreground,#06c)' : 'var(--vscode-disabledForeground,#999)'};">` +
+    `${label}</button>`
+  );
+}
+
+export interface NavigationState {
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
 export function renderDocumentationPage(
   webview: Webview,
   html: string,
   localUri: Uri,
   hackageUri: string | undefined,
+  navigation: NavigationState = { canGoBack: false, canGoForward: false },
 ): string {
   const fileUri = localUri.with({ fragment: '' });
   const anchor = haddockAnchor(localUri.fragment);
@@ -424,7 +510,10 @@ export function renderDocumentationPage(
   // Relative links in the page resolve against the webview uri of its directory.
   const base = `<base href="${webview.asWebviewUri(Uri.file(dirname(fileUri.fsPath))).toString()}/">`;
 
-  const links = [];
+  const links = [
+    navButton('&#8592; Back', 'back', navigation.canGoBack) +
+      navButton('Forward &#8594;', 'forward', navigation.canGoForward),
+  ];
   if (hackageUri) {
     links.push(commandLink('View on Hackage', OpenOnHackageCommandName, { hackageUri, inWebView: false }));
   }
@@ -473,17 +562,47 @@ export function renderDocumentationPage(
           scrollTo(anchors);
         }
 
-        document.addEventListener('click', function (event) {
+        function navigate(direction) {
+          if (vscode) {
+            vscode.postMessage({ nav: direction });
+          }
+        }
+
+        // The toolbar's own buttons, handled before the link interception below.
+        window.addEventListener('click', function (event) {
+          const button = event.target && event.target.closest ? event.target.closest('button[data-nav]') : null;
+          if (!button || button.disabled) {
+            return;
+          }
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          navigate(button.getAttribute('data-nav'));
+        }, true);
+
+        // Capture phase, and stop the event dead once we take a link over: the
+        // webview host listens for clicks too and hands anything it sees to the
+        // system browser, which would otherwise open alongside our own panel.
+        window.addEventListener('click', function (event) {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            // Leave the modified click to the host: it is how one deliberately
+            // opens a page outside vscode.
+            return;
+          }
           const anchor = event.target && event.target.closest ? event.target.closest('a') : null;
           const href = anchor && anchor.getAttribute('href');
           if (!href || href.startsWith('command:')) {
             return;
           }
-          event.preventDefault();
           if (href.startsWith('#')) {
-            scrollTo([decodeURIComponent(href.slice(1))]);
+            // In-page: never navigate, but let haddock's own expanders run.
+            event.preventDefault();
+            if (href.length > 1) {
+              scrollTo([decodeURIComponent(href.slice(1))]);
+            }
             return;
           }
+          event.preventDefault();
+          event.stopImmediatePropagation();
           // Cabal leaves \${pkgroot} in cross package links; resolving it as a
           // url would destroy the placeholder, so pass it on untouched.
           if (href.indexOf('\${') >= 0) {
@@ -501,7 +620,33 @@ export function renderDocumentationPage(
           } catch (e) {
             // Not a link we can follow; ignore.
           }
+        }, true);
+
+        window.addEventListener('keydown', function (event) {
+          const back = event.altKey && event.key === 'ArrowLeft';
+          const forward = event.altKey && event.key === 'ArrowRight';
+          if (!back && !forward) {
+            return;
+          }
+          event.preventDefault();
+          navigate(back ? 'back' : 'forward');
         });
+
+        // Mouse thumb buttons, which would otherwise walk the webview's own
+        // history and strip the page we injected.
+        window.addEventListener('mousedown', function (event) {
+          if (event.button === 3 || event.button === 4) {
+            event.preventDefault();
+          }
+        }, true);
+        window.addEventListener('auxclick', function (event) {
+          if (event.button !== 3 && event.button !== 4) {
+            return;
+          }
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          navigate(event.button === 3 ? 'back' : 'forward');
+        }, true);
       })();
     </script>`;
 
