@@ -723,10 +723,22 @@ export function renderDocumentationPage(
 
         const targetMark = 'vscode-haskell-docs-target';
 
+        /**
+         * Keep what we scroll to clear of the toolbar, which is sticky and would
+         * otherwise cover it. Measured rather than assumed: the toolbar wraps to
+         * a second line when the panel is narrow.
+         */
+        function keepClearOfToolbar() {
+          const toolbar = document.querySelector('.vscode-haskell-docs-toolbar');
+          const height = toolbar ? toolbar.getBoundingClientRect().height : 0;
+          document.documentElement.style.scrollPaddingTop = height > 0 ? height + 8 + 'px' : '';
+        }
+
         function scrollTo(names) {
           for (const name of names) {
             const target = document.getElementById(name) || document.getElementsByName(name)[0];
             if (target) {
+              keepClearOfToolbar();
               target.scrollIntoView({ block: 'start' });
               // We scroll ourselves rather than setting the location, so :target
               // never matches: mark where we landed the same way instead.

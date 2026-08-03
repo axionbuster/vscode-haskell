@@ -1,5 +1,13 @@
 # Changelog for vscode-haskell
 
+## 2.99.6 (private fork)
+
+- Scroll clear of the toolbar. It is sticky, so the definition a page was
+  opened at landed underneath it and was hidden -- most visibly when the
+  panel first opened, which is when one is looking for exactly that
+  definition. The toolbar's height is measured rather than assumed, since
+  it wraps to a second line when the panel is narrow.
+
 ## 2.99.5 (private fork)
 
 - Theme the documentation panel after the editor. Haddock ships a light
