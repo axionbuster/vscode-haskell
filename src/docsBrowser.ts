@@ -263,11 +263,22 @@ interface HistoryEntry {
 let docsHistory: HistoryEntry[] = [];
 let docsHistoryIndex = -1;
 const historyLimit = 100;
+
+export function navigationState(): NavigationState {
+  return {
+    canGoBack: docsHistoryIndex > 0,
+    canGoForward: docsHistoryIndex >= 0 && docsHistoryIndex < docsHistory.length - 1,
+  };
+}
+
 /**
- * Set while we dispose the panel ourselves to widen `localResourceRoots`; the
- * history belongs to the user's navigation, not to the panel instance.
+ * Tell the page where it now stands. The toolbar is rendered with the state of
+ * the moment, and jumping to an anchor moves the history without reloading the
+ * page, so the buttons have to be told about it.
  */
-let recreatingPanel = false;
+function postNavigationState(): void {
+  void docsPanel?.webview.postMessage({ navigationState: navigationState() });
+}
 
 function pushHistoryEntry(entry: HistoryEntry): void {
   if (docsHistory[docsHistoryIndex]?.localPath === entry.localPath) {
@@ -277,17 +288,41 @@ function pushHistoryEntry(entry: HistoryEntry): void {
   docsHistoryIndex = docsHistory.length - 1;
 }
 
+/**
+ * An anchor jump within the page. Haddock links most identifiers to their own
+ * page, so these make up the bulk of the navigating one does; a browser records
+ * them, and without them Back stays dead however much one clicks around.
+ */
+function recordAnchorJump(anchor: string): void {
+  if (!docsPanelUri || anchor.length === 0) {
+    return;
+  }
+  pushHistoryEntry({ localPath: docsPanelUri.with({ fragment: anchor }).toString() });
+  postNavigationState();
+}
+
 async function navigateHistory(delta: number): Promise<void> {
   const index = docsHistoryIndex + delta;
   const entry = docsHistory[index];
   if (!entry) {
     return;
   }
+  const target = Uri.parse(entry.localPath);
+
+  // Somewhere on the page we are already showing: scroll, do not reload. That
+  // keeps the jump instant and, unlike a reload, cannot fail.
+  if (docsPanel && docsPanelUri && target.with({ fragment: '' }).toString() === docsPanelUri.toString()) {
+    docsHistoryIndex = index;
+    void docsPanel.webview.postMessage({ scrollTo: anchorCandidates(target.fragment) });
+    postNavigationState();
+    return;
+  }
+
   // Set first: the toolbar the page renders with reflects where we now are.
   const previous = docsHistoryIndex;
   docsHistoryIndex = index;
   try {
-    await showLocalDocumentation(Uri.parse(entry.localPath), entry.hackageUri, false);
+    await showLocalDocumentation(target, entry.hackageUri, false);
   } catch (e) {
     // The page went away since it was visited -- drop it and stay put.
     docsHistoryIndex = previous;
@@ -299,6 +334,11 @@ async function navigateHistory(delta: number): Promise<void> {
       await window.showErrorMessage(e.message);
     }
   }
+}
+
+/** The escaped anchor haddock emitted, and the raw name as a fallback. */
+function anchorCandidates(fragment: string): string[] {
+  return [haddockAnchor(fragment), fragment].filter((a, i, all) => a.length > 0 && all.indexOf(a) === i);
 }
 
 /**
@@ -329,33 +369,35 @@ async function showLocalDocumentation(
   // current roots needs a fresh panel.
   if (docsPanel && !docsPanelRoots.some((root) => isUnder(fileUri.fsPath, root))) {
     const stale = docsPanel;
+    // Cleared first, so that the disposal below is recognised as ours: the
+    // history belongs to the user's navigation, not to the panel instance.
     docsPanel = undefined;
-    recreatingPanel = true;
-    try {
-      stale.dispose();
-    } finally {
-      recreatingPanel = false;
-    }
+    stale.dispose();
   }
 
   if (!docsPanel) {
     docsPanelRoots = resourceRootsFor(fileUri);
-    docsPanel = window.createWebviewPanel('haskell.showDocumentationPanel', moduleTitle(fileUri), ViewColumn.Beside, {
+    const panel = window.createWebviewPanel('haskell.showDocumentationPanel', moduleTitle(fileUri), ViewColumn.Beside, {
       localResourceRoots: docsPanelRoots.map((root) => Uri.file(root)),
       enableFindWidget: true,
       enableCommandUris: [ShowDocumentationCommandName, OpenOnHackageCommandName, OpenExternallyCommandName],
       enableScripts: true,
     });
-    docsPanel.onDidDispose(() => {
+    docsPanel = panel;
+    panel.onDidDispose(() => {
+      // Only when this is still the panel on screen: a panel we replaced
+      // ourselves takes neither the history nor its successor with it,
+      // whenever the host gets around to telling us about the disposal.
+      if (docsPanel !== panel) {
+        return;
+      }
       docsPanel = undefined;
       docsPanelRoots = [];
       docsPanelUri = undefined;
-      if (!recreatingPanel) {
-        docsHistory = [];
-        docsHistoryIndex = -1;
-      }
+      docsHistory = [];
+      docsHistoryIndex = -1;
     });
-    docsPanel.webview.onDidReceiveMessage(onWebviewMessage);
+    panel.webview.onDidReceiveMessage(onWebviewMessage);
   }
 
   if (recordHistory) {
@@ -364,19 +406,25 @@ async function showLocalDocumentation(
 
   docsPanelUri = fileUri;
   docsPanel.title = moduleTitle(fileUri);
-  docsPanel.webview.html = renderDocumentationPage(docsPanel.webview, html, localUri, hackageUri, {
-    canGoBack: docsHistoryIndex > 0,
-    canGoForward: docsHistoryIndex >= 0 && docsHistoryIndex < docsHistory.length - 1,
-  });
+  docsPanel.webview.html = renderDocumentationPage(docsPanel.webview, html, localUri, hackageUri, navigationState());
   docsPanel.reveal(docsPanel.viewColumn ?? ViewColumn.Beside, true);
   return docsPanel;
 }
 
 /** Follow a link the user clicked inside the webview. */
 async function onWebviewMessage(message: unknown): Promise<void> {
-  const { href, raw, nav } = (message ?? {}) as { href?: unknown; raw?: unknown; nav?: unknown };
+  const { href, raw, nav, anchor } = (message ?? {}) as {
+    href?: unknown;
+    raw?: unknown;
+    nav?: unknown;
+    anchor?: unknown;
+  };
   if (nav === 'back' || nav === 'forward') {
     await navigateHistory(nav === 'back' ? -1 : 1);
+    return;
+  }
+  if (typeof anchor === 'string') {
+    recordAnchorJump(anchor);
     return;
   }
   if (typeof raw === 'string') {
@@ -482,15 +530,31 @@ function commandLink(label: string, command: string, args: unknown): string {
   return `<a href="command:${command}?${encodeURIComponent(JSON.stringify(args))}">${label}</a>`;
 }
 
+/**
+ * Appearance is left to the stylesheet rather than set inline: the buttons are
+ * enabled and disabled as the history moves, without the page being rendered
+ * again.
+ */
 function navButton(label: string, nav: 'back' | 'forward', enabled: boolean): string {
-  return (
-    `<button type="button" data-nav="${nav}"${enabled ? '' : ' disabled'} title="${
-      nav === 'back' ? 'Back (Alt+Left)' : 'Forward (Alt+Right)'
-    }" style="font:inherit;background:none;border:none;padding:0 4px;cursor:${enabled ? 'pointer' : 'default'};` +
-    `color:${enabled ? 'var(--vscode-textLink-foreground,#06c)' : 'var(--vscode-disabledForeground,#999)'};">` +
-    `${label}</button>`
-  );
+  const title = nav === 'back' ? 'Back (Alt+Left)' : 'Forward (Alt+Right)';
+  return `<button type="button" data-nav="${nav}"${enabled ? '' : ' disabled'} title="${title}">${label}</button>`;
 }
+
+const toolbarStyle = `
+  <style>
+    .vscode-haskell-docs-toolbar button {
+      font: inherit;
+      background: none;
+      border: none;
+      padding: 0 4px;
+      cursor: pointer;
+      color: var(--vscode-textLink-foreground, #06c);
+    }
+    .vscode-haskell-docs-toolbar button:disabled {
+      cursor: default;
+      color: var(--vscode-disabledForeground, #999);
+    }
+  </style>`;
 
 export interface NavigationState {
   canGoBack: boolean;
@@ -522,7 +586,9 @@ export function renderDocumentationPage(
       uri: fileUri.with({ fragment: anchor }).toString(),
     }),
   );
-  const toolbar = `
+  const toolbar =
+    toolbarStyle +
+    `
     <div class="vscode-haskell-docs-toolbar"
          style="position:sticky;top:0;z-index:10000;padding:6px 10px;margin:0 0 8px 0;
                 font-family:var(--vscode-font-family);font-size:12px;
@@ -551,10 +617,21 @@ export function renderDocumentationPage(
             const target = document.getElementById(name) || document.getElementsByName(name)[0];
             if (target) {
               target.scrollIntoView({ block: 'start' });
-              return true;
+              return name;
             }
           }
-          return false;
+          return undefined;
+        }
+
+        // A jump the user asked for, as opposed to the one we make on load:
+        // haddock links most identifiers to their own page, and a browser
+        // records those jumps, so the history has to hear about them.
+        function jumpTo(names) {
+          const reached = scrollTo(names);
+          if (reached !== undefined && vscode) {
+            vscode.postMessage({ anchor: reached });
+          }
+          return reached !== undefined;
         }
 
         if (anchors.length > 0) {
@@ -567,6 +644,27 @@ export function renderDocumentationPage(
             vscode.postMessage({ nav: direction });
           }
         }
+
+        // Going back to an anchor on this very page is a scroll, not a reload,
+        // so the toolbar is told separately where the history now stands.
+        window.addEventListener('message', function (event) {
+          const message = event.data || {};
+          if (message.scrollTo) {
+            // No anchor: that entry is the page as it was opened, i.e. the top.
+            if (message.scrollTo.length === 0) {
+              window.scrollTo(0, 0);
+            } else {
+              scrollTo(message.scrollTo);
+            }
+          }
+          if (message.navigationState) {
+            const state = message.navigationState;
+            const buttons = document.querySelectorAll('.vscode-haskell-docs-toolbar button[data-nav]');
+            buttons.forEach(function (button) {
+              button.disabled = button.getAttribute('data-nav') === 'back' ? !state.canGoBack : !state.canGoForward;
+            });
+          }
+        });
 
         // The toolbar's own buttons, handled before the link interception below.
         window.addEventListener('click', function (event) {
@@ -597,7 +695,7 @@ export function renderDocumentationPage(
             // In-page: never navigate, but let haddock's own expanders run.
             event.preventDefault();
             if (href.length > 1) {
-              scrollTo([decodeURIComponent(href.slice(1))]);
+              jumpTo([decodeURIComponent(href.slice(1))]);
             }
             return;
           }
@@ -613,7 +711,7 @@ export function renderDocumentationPage(
             const target = new URL(href, fileBase);
             // A link into this very page: scroll rather than reload it.
             if (target.href.split('#')[0] === fileBase && target.hash) {
-              scrollTo([decodeURIComponent(target.hash.slice(1))]);
+              jumpTo([decodeURIComponent(target.hash.slice(1))]);
               return;
             }
             vscode.postMessage({ href: target.toString() });

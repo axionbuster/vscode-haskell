@@ -1,5 +1,20 @@
 # Changelog for vscode-haskell
 
+## 2.99.4 (private fork)
+
+- Record anchor jumps in the documentation panel's history. Haddock links
+  most identifiers to their own page, so the bulk of the clicking one does
+  never left the page and never reached the history: `Back` stayed dead
+  however much one navigated. Jumping to an anchor is now a history entry,
+  as it is in a browser, and going back to one scrolls rather than
+  reloading the page.
+- Keep the toolbar in step with the history without rendering the page
+  again, so the buttons are right after an anchor jump.
+- Do not lose the history when the panel is replaced to widen its resource
+  roots. The disposal is now recognised by the panel's identity rather
+  than by a flag held across the call, which held only as long as the host
+  reported the disposal synchronously.
+
 ## 2.99.3 (private fork)
 
 - Stop the documentation panel from opening the system browser alongside
