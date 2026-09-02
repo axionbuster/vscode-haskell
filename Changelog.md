@@ -1,5 +1,16 @@
 # Changelog for vscode-haskell
 
+## 2.99.9 (private fork)
+
+- Add explicit Unicode shortcuts in Haskell and Literate Haskell files, including
+  `\alpha`, `\forall`, `\::`, and `\->`. Tab expands a shortcut, Space expands and
+  adds a space, and backslash expands and starts the next shortcut. Includes
+  completion suggestions, multiple-cursor support, and the `haskell.unicodeInput`
+  setting. Input works in unsaved files independently of HLS.
+- Include all Greek letters in both cases, common math and physics symbols, and
+  Lean-style subscript and superscript shortcuts such as `\_1`, `\_i`, `\^2`,
+  `\^T`, and `\^-1`.
+
 ## 2.99.8 (private fork)
 
 - Stop showing haddock's hyperlinked source in the panel. It is a

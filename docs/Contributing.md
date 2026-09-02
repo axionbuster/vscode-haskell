@@ -11,6 +11,19 @@ You can also package up the extension with
 
 _Note:_ that if you get errors running `vsce package`, it might help running `npm run pretest` directly, since that gives the actual error output of the TypeScript compilation.
 
+## Unicode input tests
+
+`npm run test:unicode` builds the extension and runs its Unicode input tests in a
+VS Code extension host using unsaved documents. It requires no Haskell toolchain.
+On headless Linux, run it through `xvfb-run -a`.
+
+`npm run test:unicode:keyboard` runs the typing workflow through real keystrokes on
+a private Xvfb display. It requires Linux, Xvfb, and `xdotool`, and installs the
+Haskell syntax extension into the test profile. This checks Tab dispatch, typed
+Space and backslash conversion, and character ordering during rapid input. Keep
+this check when changing input handling: calling a command directly bypasses
+VS Code's keybinding dispatch and timing between keystrokes.
+
 ## Developing inside VS Code
 
 - Launch VS Code, press `File` > `Open Folder`, open the `vscode-haskell` folder;

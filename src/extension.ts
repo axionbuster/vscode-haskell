@@ -15,6 +15,7 @@ import { findHaskellLanguageServer, HlsExecutable, IEnvVars, fetchConfig } from 
 import { addPathToProcessPath, comparePVP, callAsync } from './utils';
 import { Config, initConfig, initLoggerFromConfig, logConfig } from './config';
 import { HaskellStatusBar } from './statusBar';
+import { registerUnicodeInput } from './unicodeInput';
 import {
   buildMiddleware,
   ClientRoot,
@@ -42,6 +43,7 @@ const hlsNumericVersions: Map<string, string> = new Map();
 
 // This is the entrypoint to our extension
 export async function activate(context: ExtensionContext) {
+  context.subscriptions.push(registerUnicodeInput());
   const statusBar = new HaskellStatusBar(context.extension.packageJSON.version as string | undefined);
   context.subscriptions.push(statusBar);
 

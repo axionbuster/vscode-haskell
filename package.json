@@ -2,7 +2,7 @@
   "name": "haskell",
   "displayName": "Haskell",
   "description": "Haskell language support powered by the Haskell Language Server (private fork with per-project servers, duplicate-client fix, and display-name shortening)",
-  "version": "2.99.8",
+  "version": "2.99.9",
   "license": "MIT",
   "publisher": "haskell",
   "engines": {
@@ -77,6 +77,12 @@
       "type": "object",
       "title": "Haskell",
       "properties": {
+        "haskell.unicodeInput": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "(fork) Expand explicit Unicode shortcuts such as `\\alpha`, `\\::`, and `\\->` with Tab, Space, or another backslash in Haskell files. Space is preserved; backslash starts another shortcut. This inserts characters without changing language extensions."
+        },
         "haskell.serverScope": {
           "scope": "resource",
           "type": "string",
@@ -1381,7 +1387,33 @@
         }
       }
     },
+    "keybindings": [
+      {
+        "key": "tab",
+        "command": "haskell.commands.expandUnicode",
+        "when": "editorTextFocus && !editorReadonly && !editorTabMovesFocus && !inSnippetMode && !suggestWidgetVisible && editorLangId =~ /^(haskell|literate\\shaskell)$/ && config.haskell.unicodeInput"
+      },
+      {
+        "key": "tab",
+        "command": "haskell.commands.expandUnicode",
+        "when": "editorTextFocus && !editorReadonly && !editorTabMovesFocus && !inSnippetMode && suggestWidgetVisible && editorLangId =~ /^(haskell|literate\\shaskell)$/ && config.haskell.unicodeInput",
+        "args": true
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "haskell.commands.expandUnicode",
+          "when": "haskell.unicodeInputExact"
+        }
+      ]
+    },
     "commands": [
+      {
+        "command": "haskell.commands.expandUnicode",
+        "title": "Haskell: Expand Unicode Shortcut",
+        "enablement": "editorTextFocus && !editorReadonly && editorLangId =~ /^(haskell|literate\\shaskell)$/ && config.haskell.unicodeInput"
+      },
       {
         "command": "haskell.commands.restartExtension",
         "title": "Haskell: Restart vscode-haskell extension",
@@ -1415,7 +1447,9 @@
     "push-tag": "git tag -a $npm_package_version -m \"Version $npm_package_version\" && git push origin $npm_package_version",
     "pretest": "tsc --alwaysStrict -p ./",
     "format": "prettier . --write",
-    "test": "vscode-test"
+    "test": "vscode-test --label integration-tests",
+    "test:unicode": "npm run pretest && npm run webpack && vscode-test --label unicode-input-tests",
+    "test:unicode:keyboard": "npm run pretest && npm run webpack && xvfb-run -a vscode-test --label unicode-keyboard-tests"
   },
   "husky": {
     "hooks": {

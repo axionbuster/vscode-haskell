@@ -32,6 +32,7 @@ As almost all features are provided by the server you might find interesting rea
   - [Table of Contents](#table-of-contents)
   - [Setup](#setup)
   - [Features](#features)
+    - [Unicode input](#unicode-input)
   - [Requirements](#requirements)
   - [Configuration options](#configuration-options)
     - [Path to server executable](#path-to-server-executable)
@@ -82,6 +83,65 @@ You can watch demos for some of these features [here](https://haskell-language-s
 - [Integration](https://haskell-language-server.readthedocs.io/en/latest/features.html#hlint) with [hlint](https://github.com/ndmitchell/hlint), the most used haskell linter, to show diagnostics and apply hints via [apply-refact](https://github.com/mpickering/apply-refact)
 - [Module name suggestions](https://haskell-language-server.readthedocs.io/en/latest/features.html#module-names) for insertion or correction
 - [Call hierarchy support](https://haskell-language-server.readthedocs.io/en/latest/features.html#call-hierarchy)
+- Unicode input through explicit backslash shortcuts (private fork)
+
+### Unicode input
+
+In Haskell and Literate Haskell files, type a backslash shortcut and press **Tab**,
+**Space**, or **backslash** to insert its Unicode character. Space is kept after the
+character. Backslash finishes the current shortcut and starts the next one: typing
+`\alpha\->\beta` and pressing Tab produces `α→β`.
+
+| Shortcuts                                     | Character               |
+| --------------------------------------------- | ----------------------- |
+| `\::`                                         | `∷`                     |
+| `\->`, `\to`, `\rightarrow`                   | `→`                     |
+| `\<-`, `\leftarrow`                           | `←`                     |
+| `\=>`, `\Rightarrow`                          | `⇒`                     |
+| `\forall`                                     | `∀`                     |
+| `\alpha`, `\beta`, `\gamma`, …                | `α`, `β`, `γ`, …        |
+| `\Gamma`, `\Delta`, `\Sigma`, …               | `Γ`, `Δ`, `Σ`, …        |
+| `\<=`, `\leq`; `\>=`, `\geq`; `\/=`, `\neq`   | `≤`; `≥`; `≠`           |
+| `\in`, `\subseteq`, `\cup`, `\cap`, `\infty`  | `∈`, `⊆`, `∪`, `∩`, `∞` |
+| `\hbar`, `\partial`, `\nabla`, `\sum`, `\int` | `ℏ`, `∂`, `∇`, `∑`, `∫` |
+| `\_0` through `\_9`                           | `₀` through `₉`         |
+| `\_a`, `\_i`, `\_j`, `\_beta`, …              | `ₐ`, `ᵢ`, `ⱼ`, `ᵦ`, …   |
+| `\^0` through `\^9`                           | `⁰` through `⁹`         |
+| `\^n`, `\^i`, `\^T`                           | `ⁿ`, `ⁱ`, `ᵀ`           |
+| `\^-1`                                        | `⁻¹`                    |
+
+All 24 Greek letters have lowercase and uppercase shortcuts. Variants include
+`\varepsilon`, `\vartheta`, `\varphi`, `\varrho`, and `\varsigma`. Math and physics
+input also includes integrals, products, roots, tensor products, and angle brackets.
+
+The completion menu lists matching shortcuts after a backslash; use Ctrl+Space to
+open it manually. Space and backslash expand only a complete, recognized shortcut.
+Unknown shortcuts and doubled backslashes (such as `\\alpha`) stay literal. Undo
+restores the shortcut, keeping any typed space or backslash. Input works
+with multiple cursors, in comments and strings, and in unsaved files before HLS
+starts. Set `haskell.unicodeInput` to `false` to disable it.
+
+These shortcuts insert characters. Haskell syntax such as `∷` and `→` requires
+`UnicodeSyntax` in the project or file. Mathematical symbols such as `≤` need their
+own definitions or imports, and `λ` is an identifier character. The extension keeps
+ordinary ASCII input and language-extension settings as typed.
+
+Subscript and superscript digits and letters can follow the first character of a
+Haskell identifier without `UnicodeSyntax`: `x₁`, `vᵢ`, `x²`, and `matrixᵀ` are
+names. They do not perform indexing, exponentiation, or transposition. Superscript
+minus is a symbol, so `x⁻¹` is unsuitable as an identifier; `\^-1` is available for
+mathematical text in comments and strings. Use ordinary Haskell expressions such
+as `x ^ 2` and `recip x` to compute a square or reciprocal.
+
+The subscript Latin letters available are `a e h i j k l m n o p r s t u v x`;
+Greek subscripts include `\_beta`, `\_gamma`, `\_rho`, `\_phi`, and `\_chi`.
+Superscript letters use the same `\^` convention, including `\^T` for transpose
+notation. These alphabets have gaps in Unicode, so unsupported shortcuts stay
+literal. Type `\_` or `\^` and open the completion menu to see the available forms.
+
+Automatic conversion of ordinary ASCII syntax based on the file's effective
+`UnicodeSyntax` setting is deferred. That work needs project and file extension
+detection, syntax-aware exclusions, and validation while code is incomplete.
 
 ## Requirements
 

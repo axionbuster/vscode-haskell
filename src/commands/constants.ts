@@ -4,3 +4,4 @@ export const StartServerCommandName = 'haskell.commands.startServer';
 export const StopServerCommandName = 'haskell.commands.stopServer';
 export const OpenLogsCommandName = 'haskell.commands.openLogs';
 export const ShowExtensionVersions = 'haskell.commands.showVersions';
+export const ExpandUnicodeCommandName = 'haskell.commands.expandUnicode';
